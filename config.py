@@ -27,7 +27,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =============================================================================
 # Data Acquisition & Feature Selection
 # =============================================================================
-lat_lon = [90, -180, -90, 180]
+lat_lon = [70, -260, 0, -100]
 
 years = [x for x in range(2000, 2020)]
 months = [x for x in range(1, 13)]

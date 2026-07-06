@@ -58,8 +58,11 @@ pressure_path = "era5_pressure_data.nc"
 # =============================================================================
 nm_to_km = 1.852
 grid_res = 1/125
-area_growth_factor = 2
-
+area_growth_factor = 0.25
+lifestages = ['Storm - Nondeveloping',
+              'Cyclolysis',
+              'Cyclogenesis',
+              'Active Cyclone',]
 train_set_percent = 0.75
 valid_set_percent = 0.05
 test_set_percent = 0.2
@@ -73,7 +76,7 @@ epochs = 64
 batch_size = 8
 num_workers = 0
 learning_rate = 0.0001
-weight_decay = 1e-5
+weight_decay = 1e-4
 dropout = 0.1
 
 model_path = 'cyclone-hydro-ml.pt'

@@ -16,37 +16,55 @@ data_dir = config.era5_data_dir
 
 for year in config.years:
     for month in config.months:
-        request = {
-            "product_type": "reanalysis",
-            "variable": config.pressure_variables,
-            "year": [str(year)],
-            "month": [str(month)],
-            "day": config.days,
-            "time": config.hours,
-            "pressure_level": config.pressure_levels,
-            "data_format": "netcdf",
-            "download_format": "unarchived",
-            "area": config.lat_lon
-        }
         filename = os.path.join(data_dir, f"era5_pressure_{year}_{month}.nc")
-        client.retrieve(config.pressure_dataset, request).download(filename)
+        try:
+            xr.open_dataset(filename,
+                engine="h5netcdf",
+                parallel=True,
+                coords="minimal",
+                data_vars="all",
+                chunks="auto",
+            )
+        except:
+            request = {
+                "product_type": "reanalysis",
+                "variable": config.pressure_variables,
+                "year": [str(year)],
+                "month": [str(month)],
+                "day": config.days,
+                "time": config.hours,
+                "pressure_level": config.pressure_levels,
+                "data_format": "netcdf",
+                "download_format": "unarchived",
+                "area": config.lat_lon
+            }
+            client.retrieve(config.pressure_dataset, request).download(filename)
 
 
 for year in config.years:
     for month in config.months:
-        request = {
-            "product_type": "reanalysis",
-            "variable": config.surface_variables,
-            "year": [str(year)],
-            "month": [str(month)],
-            "day": config.days,
-            "time": config.hours,
-            "data_format": "netcdf",
-            "download_format": "unarchived",
-            "area": config.lat_lon
-        }
         filename = os.path.join(data_dir, f"era5_surface_{year}_{month}.nc")
-        client.retrieve(config.surface_dataset, request).download(filename)
+        try:
+            xr.open_dataset(filename,
+                engine="h5netcdf",
+                parallel=True,
+                coords="minimal",
+                data_vars="all",
+                chunks="auto",
+            )
+        except:
+            request = {
+                "product_type": "reanalysis",
+                "variable": config.surface_variables,
+                "year": [str(year)],
+                "month": [str(month)],
+                "day": config.days,
+                "time": config.hours,
+                "data_format": "netcdf",
+                "download_format": "unarchived",
+                "area": config.lat_lon
+            }
+            client.retrieve(config.surface_dataset, request).download(filename)
 
 
 # =============================================================================

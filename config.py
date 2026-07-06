@@ -19,7 +19,7 @@ os.makedirs(data_dir, exist_ok=True)
 os.makedirs(era5_data_dir, exist_ok=True)
 
 cds_api_url = "https://cds.climate.copernicus.eu/api"
-cds_api_key = "########################"
+# cds_api_key = "########################"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =============================================================================
 lat_lon = [70, -260, 0, -100]
 
-years = [x for x in range(2000, 2020)]
+years = [x for x in range(2010, 2016)]
 months = [x for x in range(1, 13)]
 days = [x for x in range(1, 32)]
 hours = [6*x for x in range(0, 4)]
@@ -58,7 +58,7 @@ pressure_path = "era5_pressure_data.nc"
 # =============================================================================
 nm_to_km = 1.852
 grid_res = 1/125
-area_growth_factor = 5
+area_growth_factor = 2
 
 train_set_percent = 0.75
 valid_set_percent = 0.05

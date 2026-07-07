@@ -37,13 +37,13 @@ surface_array = xr.open_dataset('haiyan_surface.nc',
 # Transform SST using land-temperature mask
 # =============================================================================
 sst_mask = (np.isnan(surface_array.sst.isel(valid_time=0))).astype(int)
-sst_mask = (sst_mask.expand_dims(valid_time=surface_array.valid_time, axis=0).
-            expand_dims(channel=[-2], axis=-1).
-            transpose('valid_time', 'latitude', 'longitude', 'channel'))
+sst_mask = sst_mask.expand_dims(valid_time=surface_array.valid_time, axis=0)
+sst_mask = sst_mask.expand_dims('channel', axis=-1)
+sst_mask = sst_mask.transpose('valid_time', 'latitude', 'longitude', 'channel')
 
 sst = surface_array.sst.fillna(surface_array.t2m)
-sst = (sst.expand_dims(channel=[-1], axis=-1).
-       transpose('valid_time', 'latitude', 'longitude', 'channel'))
+sst = sst.expand_dims('channel', axis=-1)
+sst = sst.transpose('valid_time', 'latitude', 'longitude', 'channel')
 
 
 # =============================================================================

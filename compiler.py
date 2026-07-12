@@ -17,7 +17,7 @@ import shutil
 # =============================================================================
 # Load in ERA5 data
 # =============================================================================
-pressure_data = xr.open_dataset('haiyan_pressure.nc',
+pressure_data = xr.open_dataset('era5_pressure_data.nc',
                                 # config.pressure_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})
@@ -27,7 +27,7 @@ pressure_array = pressure_array.transpose('valid_time', 'latitude',
                                           'longitude', 'var', 'pressure_level')
 pressure_array = pressure_array.stack(channel=('var', 'pressure_level'))
 
-surface_array = xr.open_dataset('haiyan_surface.nc',
+surface_array = xr.open_dataset('era5_surface_data.nc',
                                 # config.surface_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})
@@ -36,12 +36,12 @@ surface_array = xr.open_dataset('haiyan_surface.nc',
 # =============================================================================
 # Transform SST using land-temperature mask
 # =============================================================================
-sst_mask = (np.isnan(surface_array.sst.isel(valid_time=0))).astype(int)
+sst_mask = (np.isnan(surface_array.sst.isel(valid_time=0))).astype(int)[0]
 sst_mask = (sst_mask.expand_dims(valid_time=surface_array.valid_time, axis=0).
             expand_dims(channel=[-2], axis=-1).
             transpose('valid_time', 'latitude', 'longitude', 'channel'))
 
-sst = surface_array.sst.fillna(surface_array.t2m)
+sst = surface_array.sst.fillna(surface_array.t2m)[0]
 sst = (sst.expand_dims(channel=[-1], axis=-1).
        transpose('valid_time', 'latitude', 'longitude', 'channel'))
 
@@ -76,10 +76,11 @@ feature_array = xr.concat([pressure_array, sst_mask, sst],
 # =============================================================================
 # Load in IBTRACS data, define radii, and lifestage classifications
 # =============================================================================
-df = pd.read_csv('ibtracs.since1980.list.v04r01.csv',
-                 usecols=['SID', 'ISO_TIME', 'LAT', 'LON', 'USA_STATUS',
+df = pd.read_csv('ibtracs.since1980.list.v04r01.csv')
+df = df[['SID', 'ISO_TIME', 'LAT', 'LON', 'USA_STATUS',
                           'USA_WIND', 'USA_PRES', 'USA_SSHS', 'USA_R34_NE',
-                          'USA_R34_SE', 'USA_R34_SW', 'USA_R34_NW']).drop(0)
+                          'USA_R34_SE', 'USA_R34_SW', 'USA_R34_NW']]
+df = df.drop(0)
 df['ISO_TIME'] = pd.to_datetime(df['ISO_TIME'], errors='coerce')
 df['USA_SSHS'] = pd.to_numeric(df['USA_SSHS'], errors='coerce')
 df['USA_SSHS'] = df['USA_SSHS'].fillna(-1)
@@ -176,7 +177,7 @@ cyclones = drop_both_overlapping(cyclones)
 # =============================================================================
 # Build input-output sample dataset from cyclone bounding boxes
 # =============================================================================
-precipitation = surface_array['t2m']
+precipitation = surface_array['tp'][0]
 precipitation = precipitation.astype('float32')
 precipitation = (
     precipitation.expand_dims(channel=[0], axis=-1)
@@ -212,19 +213,19 @@ def _crop_or_pad(arr):
         x0 = (w - target_size) // 2
         return arr[y0:y0 + target_size, x0:x0 + target_size, :]
 
-    pad_h = max(0, target_size - h)
-    pad_w = max(0, target_size - w)
+    # pad_h = max(0, target_size - h)
+    # pad_w = max(0, target_size - w)
 
-    pad_top = pad_h // 2
-    pad_bottom = pad_h - pad_top
-    pad_left = pad_w // 2
-    pad_right = pad_w - pad_left
+    # pad_top = pad_h // 2
+    # pad_bottom = pad_h - pad_top
+    # pad_left = pad_w // 2
+    # pad_right = pad_w - pad_left
 
-    return np.pad(
-        arr,
-        ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
-        mode="constant",
-    )
+    # return np.pad(
+    #     arr,
+    #     ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
+    #     mode="constant",
+    # )
 
 input_arrays = []
 output_arrays = []

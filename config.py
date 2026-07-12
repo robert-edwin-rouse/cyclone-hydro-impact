@@ -27,20 +27,24 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =============================================================================
 # Data Acquisition & Feature Selection
 # =============================================================================
-lat_lon = [70, -260, 0, -100]
+lat_lon = [90, -180, -90, 180]
 
-years = [x for x in range(2010, 2016)]
+years = [x for x in range(2011, 2012)]
 months = [x for x in range(1, 13)]
 days = [x for x in range(1, 32)]
 hours = [6*x for x in range(0, 4)]
 
 surface_dataset = "reanalysis-era5-single-levels"
-surface_variables = ["model_bathymetry",
-                     "sea_surface_temperature",
-                     "2m_temperature",
-                     "total_precipitation",]
-surface_var_codes = ["sst", "t2m", "tp"]
-surface_path = "era5_surface_data.nc"
+sst_variables = ["sea_surface_temperature",
+                 "2m_temperature",]
+sst_var_codes = ["sst", "t2m"]
+sst_path = "era5_sst_data.nc"
+
+
+rain_variables = ["total_precipitation",]
+rain_var_codes = ["tp",]
+rain_path = "era5_rain_data.nc"
+
 
 pressure_dataset = "reanalysis-era5-pressure-levels"
 pressure_levels = [1000, 750, 500]
@@ -63,17 +67,17 @@ lifestages = ['Storm - Nondeveloping',
               'Cyclolysis',
               'Cyclogenesis',
               'Active Cyclone',]
-train_set_percent = 0.75
+train_set_percent = 0.85
 valid_set_percent = 0.05
-test_set_percent = 0.2
+test_set_percent = 0.1
 
 
 # =============================================================================
 # Training & Model Configuration
 # =============================================================================
 optimiser = optim.AdamW
-epochs = 64
-batch_size = 8
+epochs = 512
+batch_size = 256
 num_workers = 0
 learning_rate = 0.0001
 weight_decay = 1e-4

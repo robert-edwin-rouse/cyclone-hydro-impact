@@ -7,6 +7,7 @@ import xarray as xr
 import numpy as np
 import torch
 import torch.nn as nn
+import sklearn as sk
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 import config
@@ -25,7 +26,7 @@ class CycloneDataset(Dataset):
         """
         Pending
         """
-        self.inputs = xarray_ds['inputs'].data  # Dask arrays
+        self.inputs = xarray_ds['inputs'].data
         self.labels = xarray_ds['precipitation'].data
 
 
@@ -119,22 +120,22 @@ with torch.no_grad():
         outputs = model(inputs.to(config.device))
         loss = criterion(outputs, targets.to(config.device))
         test_losses.append(loss.item())
-        all_predictions.extend(outputs.cpu().numpy().flatten())
-        all_actuals.extend(targets.cpu().numpy().flatten())
+        all_predictions.extend(outputs.cpu().numpy())
+        all_actuals.extend(targets.cpu().numpy())
 
 mean_test_loss = np.mean(test_losses)
 print(f"Test Loss: {mean_test_loss:.6f}")
 
 # Compute accuracy on flattened predictions
-predictions_binary = np.round(np.array(all_predictions))
-actuals_array = np.array(all_actuals)
-accuracy = np.mean(predictions_binary == actuals_array)
-print(f"Test Accuracy: {accuracy:.4f}")
+predictions_vector = np.array(all_predictions).flatten()
+actuals_vector = np.array(all_actuals).flatten()
+accuracy = sk.metrics.r2_score(predictions_vector, actuals_vector)
+print(accuracy)
 
 
 # =============================================================================
 # Save Model
 # =============================================================================
-print(f"\nSaving model to {config.model_track_path}...")
-torch.save(model.state_dict(), config.model_detect_path)
+print(f"\nSaving model to {config.model_path}...")
+torch.save(model.state_dict(), config.model_path)
 print("Model saved!")

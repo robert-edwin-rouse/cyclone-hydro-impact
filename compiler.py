@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import dask.array as darray
+import dask.array as da
 import config
 import os
 import shutil
@@ -17,7 +17,7 @@ import shutil
 # =============================================================================
 # Load in ERA5 data
 # =============================================================================
-pressure_data = xr.open_dataset('haiyan_pressure.nc',
+pressure_data = xr.open_dataset('era5_pressure_data.nc',
                                 # config.pressure_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})
@@ -27,7 +27,7 @@ pressure_array = pressure_array.transpose('valid_time', 'latitude',
                                           'longitude', 'var', 'pressure_level')
 pressure_array = pressure_array.stack(channel=('var', 'pressure_level'))
 
-surface_array = xr.open_dataset('haiyan_surface.nc',
+surface_array = xr.open_dataset('era5_surface_data.nc',
                                 # config.surface_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})

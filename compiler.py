@@ -184,7 +184,6 @@ precipitation = (
     .transpose('valid_time', 'latitude', 'longitude', 'channel')
 )
 
-# 1. Properly define the lazy Dask array pointers
 pressure_dask = pressure_array.data 
 precip_dask = precipitation.data
 
@@ -195,7 +194,7 @@ lon_vals = pressure_array["longitude"].values
 
 target_size = 46
 
-# 3. Keep the original index bounds helper function
+# 3. Preserved index bounds helper function
 def _index_bounds(values, lo, hi):
     if values[0] > values[-1]:
         values2 = -values
@@ -208,15 +207,14 @@ def _index_bounds(values, lo, hi):
         hi_idx = int(np.searchsorted(values, hi, side="right"))
         return lo_idx, hi_idx
 
-# 4. New memory-efficient processing function for delayed tasks
-def extract_and_process_sample(dask_array, t_idx, lat0, lat1, lon0, lon1, target_size):
+# 4. Memory-efficient processing function for delayed tasks
+def crop_or_pad_sample(sliced_numpy_array, target_size):
     """
-    Slices the parent Dask array, converts it to a tiny NumPy array, 
-    and applies standard NumPy cropping and padding. 
-    This is executed lazily as a single, isolated task.
+    Takes a tiny Dask array slice (which Dask automatically converts to a concrete 
+    NumPy array when executing the delayed task), and applies NumPy cropping and padding.
     """
-    # Slice the chunk and convert to concrete NumPy array (safe because it's tiny)
-    sub_arr = np.array(dask_array[t_idx, lat0:lat1, lon0:lon1, :])
+    # Dask automatically converts the lazy slice into a NumPy array inside this function
+    sub_arr = np.asarray(sliced_numpy_array)
     
     h, w = sub_arr.shape[:2]
 
@@ -280,13 +278,13 @@ for sample_id, row in cyclones.iterrows():
     lon0 = int(np.clip(lon0, 0, len(lon_vals) - 1))
     lon1 = int(np.clip(lon1, lon0 + 1, len(lon_vals)))
 
-    # Lazily extract and crop/pad using dask.delayed
-    delayed_in = dask.delayed(extract_and_process_sample)(
-        pressure_dask, t_idx, lat0, lat1, lon0, lon1, target_size
-    )
-    delayed_out = dask.delayed(extract_and_process_sample)(
-        precip_dask, t_idx, lat0, lat1, lon0, lon1, target_size
-    )
+    # CRUCIAL FIX: Slice the Dask array FIRST (this is cheap and lazy)
+    input_slice_lazy = pressure_dask[t_idx, lat0:lat1, lon0:lon1, :]
+    output_slice_lazy = precip_dask[t_idx, lat0:lat1, lon0:lon1, :]
+
+    # Pass ONLY the small lazy slice to the delayed task
+    delayed_in = dask.delayed(crop_or_pad_sample)(input_slice_lazy, target_size)
+    delayed_out = dask.delayed(crop_or_pad_sample)(output_slice_lazy, target_size)
 
     # Convert back to Dask Arrays with known shapes
     dask_in = da.from_delayed(
@@ -305,7 +303,7 @@ for sample_id, row in cyclones.iterrows():
     sample_times.append(storm_time)
     sample_ids.append(int(sample_id))
 
-# Stack the lazy Dask arrays into a single Dask Array (using extremely light memory)
+# Stack the lazy Dask arrays into single Dask Arrays
 input_array = da.stack(input_arrays, axis=0)
 output_array = da.stack(output_arrays, axis=0)
 

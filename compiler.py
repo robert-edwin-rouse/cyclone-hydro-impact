@@ -17,7 +17,7 @@ import shutil
 # =============================================================================
 # Load in ERA5 data
 # =============================================================================
-pressure_data = xr.open_dataset('era5_pressure_data.nc',
+pressure_data = xr.open_dataset('haiyan_pressure.nc',
                                 # config.pressure_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})
@@ -27,7 +27,7 @@ pressure_array = pressure_array.transpose('valid_time', 'latitude',
                                           'longitude', 'var', 'pressure_level')
 pressure_array = pressure_array.stack(channel=('var', 'pressure_level'))
 
-surface_array = xr.open_dataset('era5_surface_data.nc',
+surface_array = xr.open_dataset('haiyan_surface.nc',
                                 # config.surface_path,
                                 engine='h5netcdf',
                                 chunks={'valid_time': 20})
@@ -184,8 +184,8 @@ precipitation = (
     .transpose('valid_time', 'latitude', 'longitude', 'channel')
 )
 
-pressure_np = pressure_array.compute().astype("float32").values
-precip_np = precipitation.compute().astype("float32").values
+pressure_dask = pressure_array.data 
+precip_dask = precipitation.data
 
 time_vals = pressure_array["valid_time"].values
 lat_vals = pressure_array["latitude"].values
@@ -206,6 +206,7 @@ def _index_bounds(values, lo, hi):
         return lo_idx, hi_idx
 
 def _crop_or_pad(arr):
+    # arr here is a Dask array chunk
     h, w = arr.shape[:2]
 
     if h >= target_size and w >= target_size:
@@ -213,20 +214,21 @@ def _crop_or_pad(arr):
         x0 = (w - target_size) // 2
         return arr[y0:y0 + target_size, x0:x0 + target_size, :]
 
-    # pad_h = max(0, target_size - h)
-    # pad_w = max(0, target_size - w)
+    # Handle padding using dask.array.pad to keep the operation lazy
+    pad_h = max(0, target_size - h)
+    pad_w = max(0, target_size - w)
 
-    # pad_top = pad_h // 2
-    # pad_bottom = pad_h - pad_top
-    # pad_left = pad_w // 2
-    # pad_right = pad_w - pad_left
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
 
-    # return np.pad(
-    #     arr,
-    #     ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
-    #     mode="constant",
-    # )
-
+    return da.pad(
+        arr,
+        ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
+        mode="constant",
+        constant_values=0.0
+    )
 input_arrays = []
 output_arrays = []
 sample_times = []
@@ -250,139 +252,120 @@ for sample_id, row in cyclones.iterrows():
     lon0 = int(np.clip(lon0, 0, len(lon_vals) - 1))
     lon1 = int(np.clip(lon1, lon0 + 1, len(lon_vals)))
 
-    input_box = pressure_np[t_idx, lat0:lat1, lon0:lon1, :]
-    output_box = precip_np[t_idx, lat0:lat1, lon0:lon1, :]
+    # Slice the dask arrays lazily (no computation occurs here)
+    input_box = pressure_dask[t_idx, lat0:lat1, lon0:lon1, :]
+    output_box = precip_dask[t_idx, lat0:lat1, lon0:lon1, :]
 
+    # Pass the lazy arrays to our updated dask-compatible crop/pad function
     input_arrays.append(_crop_or_pad(input_box))
     output_arrays.append(_crop_or_pad(output_box))
     sample_times.append(storm_time)
     sample_ids.append(int(sample_id))
 
-input_array = np.stack(input_arrays, axis=0)
-output_array = np.stack(output_arrays, axis=0)
-
-# =============================================================================
-# Split into train/valid/test, normalise inputs from training statistics,
-# cache the statistics, and write the datasets to zarr.
-# =============================================================================
-
-def _split_indices(num_items, train_frac, valid_frac, test_frac):
-    n_train = int(num_items * train_frac)
-    n_valid = int(num_items * valid_frac)
-    n_test = num_items - n_train - n_valid
-    if n_test < 0:
-        raise ValueError(
-            f"Invalid split fractions: {train_frac}, {valid_frac}, {test_frac}"
-        )
-    idx = np.arange(num_items)
-    return idx[:n_train], idx[n_train:n_train + n_valid], idx[n_train + n_valid:]
+# Stack the lazy Dask arrays along a new sample dimension (axis=0)
+input_array = da.stack(input_arrays, axis=0)
+output_array = da.stack(output_arrays, axis=0)
 
 
-def _compute_normalisation_stats(train_inputs):
-    mean = train_inputs.mean(axis=(0, 1, 2)).astype(np.float32)
-    range_ = train_inputs.max(axis=(0, 1, 2)) - train_inputs.min(axis=(0, 1, 2))
-    range_ = np.where(range_ == 0, 1.0, range_).astype(np.float32)
-    return mean, range_
+# Convert tracking metadata into numpy arrays for splitting
+sample_times_np = np.array(sample_times)
+sample_ids_np = np.array(sample_ids)
+
+# --- Define Splits from config ---
+# Assuming config defines proportions like: config.train_pct = 0.70, config.val_pct = 0.15
+n_samples = len(sample_ids)
+train_end = int(n_samples * config.train_set_percent)
+val_end = train_end + int(n_samples * config.valid_set_percent)
+
+# Split lazy input/output Dask arrays (No data is loaded into memory yet)
+train_input = input_array[:train_end]
+val_input = input_array[train_end:val_end]
+test_input = input_array[val_end:]
+
+train_output = output_array[:train_end]
+val_output = output_array[train_end:val_end]
+test_output = output_array[val_end:]
+
+# Split corresponding metadata
+train_times, train_ids = sample_times_np[:train_end], sample_ids_np[:train_end]
+val_times, val_ids = sample_times_np[train_end:val_end], sample_ids_np[train_end:val_end]
+test_times, test_ids = sample_times_np[val_end:], sample_ids_np[val_end:]
 
 
-def save_ds_splits_to_zarr(train, valid, test, base_dir):
-    os.makedirs(base_dir, exist_ok=True)
+# Define axes to reduce over: (sample/batch, height, width)
+reduce_axes = (0, 1, 2)
 
-    for filename, split_ds in [
-        ("train_data.zarr", train),
-        ("valid_data.zarr", valid),
-        ("test_data.zarr", test),
-    ]:
-        path = os.path.join(base_dir, filename)
-        if os.path.exists(path):
-            shutil.rmtree(path)
+# Lazily define the mean and standard deviation calculations
+mean_in_lazy = train_input.mean(axis=reduce_axes)
+max_in_lazy = train_input.max(axis=reduce_axes)
+min_in_lazy = train_input.min(axis=reduce_axes)
+range_in_lazy = max_in_lazy - min_in_lazy
 
-        chunk_spec = {
-            "sample": max(1, min(20, split_ds.sizes["sample"])),
-            "latitude": split_ds.sizes["latitude"],
-            "longitude": split_ds.sizes["longitude"],
-        }
-        if "channel" in split_ds.dims:
-            chunk_spec["channel"] = split_ds.sizes["channel"]
-        if "target_channel" in split_ds.dims:
-            chunk_spec["target_channel"] = split_ds.sizes["target_channel"]
+mean_out_lazy = train_output.mean(axis=reduce_axes)
+max_out_lazy = train_output.max(axis=reduce_axes)
+min_out_lazy = train_output.min(axis=reduce_axes)
+range_out_lazy = max_out_lazy - min_out_lazy
 
-        split_ds.chunk(chunk_spec).to_zarr(path, mode="w")
+# Trigger compute ONLY on these tiny 1D arrays (extremely fast and memory-safe)
+mean_in, range_in = da.compute(mean_in_lazy, range_in_lazy)
+mean_out, range_out = da.compute(mean_out_lazy, range_out_lazy)
 
+# Guard against division by zero for invariant channels
+range_in = np.where(range_in == 0, 1.0, range_in)
+range_out = np.where(range_out == 0, 1.0, range_out)
 
-num_samples = input_array.shape[0]
-train_idx, valid_idx, test_idx = _split_indices(
-    num_samples,
-    config.train_set_percent,
-    config.valid_set_percent,
-    config.test_set_percent,
+# --- Save Normalization Parameters to NetCDF ---
+norm_ds = xr.Dataset(
+    data_vars={
+        "input_mean": (["input_channel"], mean_in),
+        "input_range": (["input_channel"], range_in),
+        "output_mean": (["output_channel"], mean_out),
+        "output_range": (["output_channel"], range_out),
+    },
+    coords={
+        "input_channel": np.arange(mean_in.shape[0]),
+        "output_channel": np.arange(mean_out.shape[0]),
+    }
 )
+norm_ds.to_netcdf("normalization_params.nc")
 
-train_inputs = input_array[train_idx].astype(np.float32)
-train_mean, train_range = _compute_normalisation_stats(train_inputs)
 
-normalised_inputs = (
-    input_array.astype(np.float32) - train_mean[None, None, None, :]
-) / train_range[None, None, None, :]
+# Apply normalization lazily
+train_input_norm = (train_input - mean_in) / range_in
+val_input_norm = (val_input - mean_in) / range_in
+test_input_norm = (test_input - mean_in) / range_in
 
-normalisation_cache = {
-    "mean": train_mean,
-    "range": train_range,
-}
+train_output_norm = (train_output - mean_out) / range_out
+val_output_norm = (val_output - mean_out) / range_out
+test_output_norm = (test_output - mean_out) / range_out
 
-stats_path = os.path.join(config.data_dir, "normalisation_stats.npz")
-np.savez_compressed(
-    stats_path,
-    mean=train_mean,
-    range=train_range,)
 
-sample_ids_arr = np.array(sample_ids, dtype=np.int32)
-sample_times_arr = np.array(sample_times, dtype="datetime64[ns]")
-
-split_inputs = [
-    normalised_inputs[train_idx],
-    normalised_inputs[valid_idx],
-    normalised_inputs[test_idx],
-]
-split_outputs = [
-    output_array[train_idx],
-    output_array[valid_idx],
-    output_array[test_idx],
-]
-split_sample_ids = [
-    sample_ids_arr[train_idx],
-    sample_ids_arr[valid_idx],
-    sample_ids_arr[test_idx],
-]
-split_sample_times = [
-    sample_times_arr[train_idx],
-    sample_times_arr[valid_idx],
-    sample_times_arr[test_idx],
-]
-
-splits = []
-for split_input, split_output, split_sample_id, split_sample_time in zip(
-    split_inputs, split_outputs, split_sample_ids, split_sample_times
-):
-    split_output = split_output.reshape(split_output.shape[0], split_output.shape[1], split_output.shape[2], 1)
-    split_ds = xr.Dataset(
+def save_split_to_zarr(input_dask, output_dask, times, ids, path):
+    """
+    Wraps normalized lazy Dask arrays and metadata into an Xarray Dataset
+    and writes it lazily to a Zarr store.
+    """
+    dataset = xr.Dataset(
         data_vars={
-            "inputs": (("sample", "latitude", "longitude", "channel"), split_input),
-            "precipitation": (("sample", "latitude", "longitude", "target_channel"), split_output),
+            "inputs": (["sample", "y", "x", "input_channel"], input_dask),
+            "outputs": (["sample", "y", "x", "output_channel"], output_dask),
+            "sample_id": (["sample"], ids),
         },
         coords={
-            "sample": split_sample_id,
-            "valid_time": ("sample", split_sample_time),
-            "latitude": np.arange(split_input.shape[1], dtype=np.int32),
-            "longitude": np.arange(split_input.shape[2], dtype=np.int32),
-            "channel": np.arange(split_input.shape[3], dtype=np.int32),
-            "target_channel": np.array([0], dtype=np.int32),
-        },
+            "sample": np.arange(len(ids)),
+            "time": (["sample"], times),
+            "y": np.arange(target_size),
+            "x": np.arange(target_size),
+            "input_channel": np.arange(input_dask.shape[-1]),
+            "output_channel": np.arange(output_dask.shape[-1]),
+        }
     )
-    splits.append(split_ds)
+    
+    # Write to Zarr lazily, utilizing Dask under the hood
+    dataset.to_zarr(path, mode="w", consolidated=True)
+    print(f"Successfully wrote {path}")
 
-train_ds, valid_ds, test_ds = splits
-save_ds_splits_to_zarr(train_ds, valid_ds, test_ds, config.data_dir)
-
-print("Saved train/valid/test datasets to", config.data_dir)
-print("Normalisation stats cached to", stats_path)
+# Write splits to disk
+save_split_to_zarr(train_input_norm, train_output_norm, train_times, train_ids, "train_dataset.zarr")
+save_split_to_zarr(val_input_norm, val_output_norm, val_times, val_ids, "val_dataset.zarr")
+save_split_to_zarr(test_input_norm, test_output_norm, test_times, test_ids, "test_dataset.zarr")

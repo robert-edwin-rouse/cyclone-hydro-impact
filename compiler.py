@@ -206,29 +206,39 @@ def _index_bounds(values, lo, hi):
         return lo_idx, hi_idx
 
 def _crop_or_pad(arr):
-    # arr here is a Dask array chunk
+    # arr here is a Dask array slice with shape (h, w, c)
     h, w = arr.shape[:2]
 
-    if h >= target_size and w >= target_size:
+    # --- Step 1: Crop dimensions that are larger than target_size ---
+    if h > target_size:
         y0 = (h - target_size) // 2
+        arr = arr[y0:y0 + target_size, :, :]
+        h = target_size
+
+    if w > target_size:
         x0 = (w - target_size) // 2
-        return arr[y0:y0 + target_size, x0:x0 + target_size, :]
+        arr = arr[:, x0:x0 + target_size, :]
+        w = target_size
 
-    # Handle padding using dask.array.pad to keep the operation lazy
-    pad_h = max(0, target_size - h)
-    pad_w = max(0, target_size - w)
+    # --- Step 2: Pad dimensions that are smaller than target_size ---
+    if h < target_size or w < target_size:
+        pad_h = max(0, target_size - h)
+        pad_w = max(0, target_size - w)
 
-    pad_top = pad_h // 2
-    pad_bottom = pad_h - pad_top
-    pad_left = pad_w // 2
-    pad_right = pad_w - pad_left
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
 
-    return da.pad(
-        arr,
-        ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
-        mode="constant",
-        constant_values=0.0
-    )
+        arr = da.pad(
+            arr,
+            ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
+            mode="constant",
+            constant_values=0.0
+        )
+
+    return arr
+
 input_arrays = []
 output_arrays = []
 sample_times = []

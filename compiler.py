@@ -184,15 +184,18 @@ precipitation = (
     .transpose('valid_time', 'latitude', 'longitude', 'channel')
 )
 
+# 1. Properly define the lazy Dask array pointers
 pressure_dask = pressure_array.data 
 precip_dask = precipitation.data
 
+# 2. Extract coordinate values into memory for quick search indices
 time_vals = pressure_array["valid_time"].values
 lat_vals = pressure_array["latitude"].values
 lon_vals = pressure_array["longitude"].values
 
 target_size = 46
 
+# 3. Keep the original index bounds helper function
 def _index_bounds(values, lo, hi):
     if values[0] > values[-1]:
         values2 = -values
@@ -205,22 +208,31 @@ def _index_bounds(values, lo, hi):
         hi_idx = int(np.searchsorted(values, hi, side="right"))
         return lo_idx, hi_idx
 
-def _crop_or_pad(arr):
-    # arr here is a Dask array slice with shape (h, w, c)
-    h, w = arr.shape[:2]
+# 4. New memory-efficient processing function for delayed tasks
+def extract_and_process_sample(dask_array, t_idx, lat0, lat1, lon0, lon1, target_size):
+    """
+    Slices the parent Dask array, converts it to a tiny NumPy array, 
+    and applies standard NumPy cropping and padding. 
+    This is executed lazily as a single, isolated task.
+    """
+    # Slice the chunk and convert to concrete NumPy array (safe because it's tiny)
+    sub_arr = np.array(dask_array[t_idx, lat0:lat1, lon0:lon1, :])
+    
+    h, w = sub_arr.shape[:2]
 
-    # --- Step 1: Crop dimensions that are larger than target_size ---
+    # Crop height if too large
     if h > target_size:
         y0 = (h - target_size) // 2
-        arr = arr[y0:y0 + target_size, :, :]
+        sub_arr = sub_arr[y0:y0 + target_size, :, :]
         h = target_size
 
+    # Crop width if too large
     if w > target_size:
         x0 = (w - target_size) // 2
-        arr = arr[:, x0:x0 + target_size, :]
+        sub_arr = sub_arr[:, x0:x0 + target_size, :]
         w = target_size
 
-    # --- Step 2: Pad dimensions that are smaller than target_size ---
+    # Pad if either dimension is too small
     if h < target_size or w < target_size:
         pad_h = max(0, target_size - h)
         pad_w = max(0, target_size - w)
@@ -230,20 +242,26 @@ def _crop_or_pad(arr):
         pad_left = pad_w // 2
         pad_right = pad_w - pad_left
 
-        arr = da.pad(
-            arr,
+        sub_arr = np.pad(
+            sub_arr,
             ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)),
             mode="constant",
             constant_values=0.0
         )
 
-    return arr
+    return sub_arr
+
 
 input_arrays = []
 output_arrays = []
 sample_times = []
 sample_ids = []
 
+# Pre-determine channel dimensions for delayed conversion
+num_channels_in = pressure_dask.shape[-1]
+num_channels_out = precip_dask.shape[-1]
+
+# 5. Extract bounding boxes lazily
 for sample_id, row in cyclones.iterrows():
     storm_time = pd.Timestamp(row["ISO_TIME"])
 
@@ -262,17 +280,32 @@ for sample_id, row in cyclones.iterrows():
     lon0 = int(np.clip(lon0, 0, len(lon_vals) - 1))
     lon1 = int(np.clip(lon1, lon0 + 1, len(lon_vals)))
 
-    # Slice the dask arrays lazily (no computation occurs here)
-    input_box = pressure_dask[t_idx, lat0:lat1, lon0:lon1, :]
-    output_box = precip_dask[t_idx, lat0:lat1, lon0:lon1, :]
+    # Lazily extract and crop/pad using dask.delayed
+    delayed_in = dask.delayed(extract_and_process_sample)(
+        pressure_dask, t_idx, lat0, lat1, lon0, lon1, target_size
+    )
+    delayed_out = dask.delayed(extract_and_process_sample)(
+        precip_dask, t_idx, lat0, lat1, lon0, lon1, target_size
+    )
 
-    # Pass the lazy arrays to our updated dask-compatible crop/pad function
-    input_arrays.append(_crop_or_pad(input_box))
-    output_arrays.append(_crop_or_pad(output_box))
+    # Convert back to Dask Arrays with known shapes
+    dask_in = da.from_delayed(
+        delayed_in, 
+        shape=(target_size, target_size, num_channels_in), 
+        dtype=np.float32
+    )
+    dask_out = da.from_delayed(
+        delayed_out, 
+        shape=(target_size, target_size, num_channels_out), 
+        dtype=np.float32
+    )
+
+    input_arrays.append(dask_in)
+    output_arrays.append(dask_out)
     sample_times.append(storm_time)
     sample_ids.append(int(sample_id))
 
-# Stack the lazy Dask arrays along a new sample dimension (axis=0)
+# Stack the lazy Dask arrays into a single Dask Array (using extremely light memory)
 input_array = da.stack(input_arrays, axis=0)
 output_array = da.stack(output_arrays, axis=0)
 

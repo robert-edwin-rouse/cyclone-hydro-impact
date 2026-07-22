@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =============================================================================
 lat_lon = [90, -180, -90, 180]
 
-years = [x for x in range(2011, 2012)]
+years = [x for x in range(2010, 2016)]
 months = [x for x in range(1, 13)]
 days = [x for x in range(1, 32)]
 hours = [6*x for x in range(0, 4)]

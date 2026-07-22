@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import dask
 import dask.array as da
 import config
 import os
@@ -20,7 +21,7 @@ import shutil
 pressure_data = xr.open_dataset('era5_pressure_data.nc',
                                 # config.pressure_path,
                                 engine='h5netcdf',
-                                chunks={'valid_time': 20})
+                                chunks={'valid_time': 160})
 pressure_vars = pressure_data[config.pressure_var_codes]
 pressure_array = pressure_vars.to_array(dim='var')
 pressure_array = pressure_array.transpose('valid_time', 'latitude',
@@ -30,7 +31,7 @@ pressure_array = pressure_array.stack(channel=('var', 'pressure_level'))
 surface_array = xr.open_dataset('era5_surface_data.nc',
                                 # config.surface_path,
                                 engine='h5netcdf',
-                                chunks={'valid_time': 20})
+                                chunks={'valid_time': 160})
 
 
 # =============================================================================
@@ -184,13 +185,13 @@ precipitation = (
     .transpose('valid_time', 'latitude', 'longitude', 'channel')
 )
 
-pressure_dask = pressure_array.data 
+feature_dask = feature_array.data 
 precip_dask = precipitation.data
 
 # 2. Extract coordinate values into memory for quick search indices
-time_vals = pressure_array["valid_time"].values
-lat_vals = pressure_array["latitude"].values
-lon_vals = pressure_array["longitude"].values
+time_vals = feature_array["valid_time"].values
+lat_vals = feature_array["latitude"].values
+lon_vals = feature_array["longitude"].values
 
 target_size = 46
 
@@ -256,7 +257,7 @@ sample_times = []
 sample_ids = []
 
 # Pre-determine channel dimensions for delayed conversion
-num_channels_in = pressure_dask.shape[-1]
+num_channels_in = feature_dask.shape[-1]
 num_channels_out = precip_dask.shape[-1]
 
 # 5. Extract bounding boxes lazily
@@ -279,7 +280,7 @@ for sample_id, row in cyclones.iterrows():
     lon1 = int(np.clip(lon1, lon0 + 1, len(lon_vals)))
 
     # CRUCIAL FIX: Slice the Dask array FIRST (this is cheap and lazy)
-    input_slice_lazy = pressure_dask[t_idx, lat0:lat1, lon0:lon1, :]
+    input_slice_lazy = feature_dask[t_idx, lat0:lat1, lon0:lon1, :]
     output_slice_lazy = precip_dask[t_idx, lat0:lat1, lon0:lon1, :]
 
     # Pass ONLY the small lazy slice to the delayed task

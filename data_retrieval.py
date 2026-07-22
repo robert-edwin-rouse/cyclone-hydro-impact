@@ -4,6 +4,8 @@
 
 import cdsapi
 import xarray as xr
+from dask.diagnostics import ProgressBar
+from dask.distributed import Client, LocalCluster
 import os
 import config
 
@@ -94,11 +96,16 @@ ds_all = xr.open_mfdataset(
     parallel=True,
     coords="minimal",
     data_vars="all",
-    chunks="auto",
+    chunks={"valid_time": 1460},
 )
-ds_all.to_netcdf(config.pressure_path)
+
+delayed_write = ds_all.to_netcdf(config.pressure_path, compute=False)
+print("Streaming dataset to disk...")
+with ProgressBar():
+    delayed_write.compute()
 ds_all.close()
-print(f"Wrote combined dataset to: {config.surface_path}")
+print(f"Wrote combined dataset to: {config.pressure_path}")
+
 
 ds_all = xr.open_mfdataset(
     "data/era5/era5_sst_*.nc",
@@ -107,11 +114,16 @@ ds_all = xr.open_mfdataset(
     parallel=True,
     coords="minimal",
     data_vars="all",
-    chunks="auto",
+    chunks={"valid_time": 1460},
 )
-ds_all.to_netcdf(config.sst_path)
+
+delayed_write = ds_all.to_netcdf(config.sst_path, compute=False)
+print("Streaming dataset to disk...")
+with ProgressBar():
+    delayed_write.compute()
 ds_all.close()
 print(f"Wrote combined dataset to: {config.sst_path}")
+
 
 ds_all = xr.open_mfdataset(
     "data/era5/era5_rain_*.nc",
@@ -120,8 +132,12 @@ ds_all = xr.open_mfdataset(
     parallel=True,
     coords="minimal",
     data_vars="all",
-    chunks="auto",
+    chunks={"valid_time": 1460},
 )
-ds_all.to_netcdf(config.rain_path)
+
+delayed_write = ds_all.to_netcdf(config.rain_path, compute=False)
+print("Streaming dataset to disk...")
+with ProgressBar():
+    delayed_write.compute()
 ds_all.close()
 print(f"Wrote combined dataset to: {config.rain_path}")

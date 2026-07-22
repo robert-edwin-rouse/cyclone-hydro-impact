@@ -39,12 +39,13 @@ sst_variables = ["sea_surface_temperature",
                  "2m_temperature",]
 sst_var_codes = ["sst", "t2m"]
 sst_path = "era5_sst_data.nc"
+sst_zarr_path = 'era5_sst_data.zarr'
 
 
 rain_variables = ["total_precipitation",]
 rain_var_codes = ["tp",]
 rain_path = "era5_rain_data.nc"
-
+rain_zarr_path = 'era5_rain_data.zarr'
 
 pressure_dataset = "reanalysis-era5-pressure-levels"
 pressure_levels = [1000, 750, 500]
@@ -55,7 +56,7 @@ pressure_variables = ["relative_humidity",
                       "vorticity"]
 pressure_var_codes = ["r", "t", "u", "v", "vo"]
 pressure_path = "era5_pressure_data.nc"
-
+pressure_zarr_path = "era5_pressure_data.zarr"
 
 # =============================================================================
 # Data Labelling & Output Configuration
